@@ -1,0 +1,16 @@
+{
+  "n_folds": 4,
+  "lgbm_quantile": {
+    "wmape_mean": 0.10970219766165874,
+    "pinball_loss_by_quantile": {
+      "0.1": 2.5208107927050927,
+      "0.5": 5.698811389816763,
+      "0.9": 2.566083684300443
+    },
+    "p10_p90_interval_coverage_mean": 0.7842261904761905
+  },
+  "seasonal_naive_baseline": {
+    "wmape_mean": 0.17409676151319334
+  },
+  "improvement_over_naive_pct": 36.98780108936987
+}
