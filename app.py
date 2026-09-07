@@ -21,15 +21,20 @@ def load_data():
 
 @st.cache_resource
 def train_models(df):
-    # Trained fresh on app startup rather than unpickled, so the app never
-    # breaks on a LightGBM/scikit-learn/Python version mismatch between the
-    # environment the model was trained in and the one it's deployed to.
+    # Uses LightGBM's native Dataset/train API rather than the LGBMRegressor
+    # scikit-learn wrapper. The wrapper couples LightGBM to whatever
+    # scikit-learn version pip resolves alongside it, which broke on
+    # Streamlit Cloud's Python 3.14 build; the native API has no scikit-learn
+    # dependency at all, so it can't break that way.
+    train_set = lgb.Dataset(df[FEATURES], label=df[TARGET])
     models = {}
     for q in QUANTILES:
-        m = lgb.LGBMRegressor(objective="quantile", alpha=q, n_estimators=200,
-                               num_leaves=31, learning_rate=0.05, min_child_samples=20, verbosity=-1)
-        m.fit(df[FEATURES], df[TARGET])
-        models[q] = m
+        params = {
+            "objective": "quantile", "alpha": q,
+            "num_leaves": 31, "learning_rate": 0.05,
+            "min_child_samples": 20, "verbosity": -1,
+        }
+        models[q] = lgb.train(params, train_set, num_boost_round=200)
     return models
 
 df, metrics = load_data()
