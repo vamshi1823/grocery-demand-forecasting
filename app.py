@@ -1,16 +1,16 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
+import lightgbm as lgb
 import json
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="Grocery Demand Forecasting", layout="wide")
 
-@st.cache_resource
-def load_models():
-    with open("models.pkl", "rb") as f:
-        return pickle.load(f)
+FEATURES = ["store", "item", "dow", "month", "is_holiday", "promo",
+            "lag_7", "lag_14", "lag_28", "roll_mean_7", "roll_mean_28", "roll_std_7"]
+TARGET = "units"
+QUANTILES = [0.1, 0.5, 0.9]
 
 @st.cache_data
 def load_data():
@@ -19,17 +19,27 @@ def load_data():
         metrics = json.load(f)
     return df, metrics
 
-models = load_models()
+@st.cache_resource
+def train_models(df):
+    # Trained fresh on app startup rather than unpickled, so the app never
+    # breaks on a LightGBM/scikit-learn/Python version mismatch between the
+    # environment the model was trained in and the one it's deployed to.
+    models = {}
+    for q in QUANTILES:
+        m = lgb.LGBMRegressor(objective="quantile", alpha=q, n_estimators=200,
+                               num_leaves=31, learning_rate=0.05, min_child_samples=20, verbosity=-1)
+        m.fit(df[FEATURES], df[TARGET])
+        models[q] = m
+    return models
+
 df, metrics = load_data()
+models = train_models(df)
 
-FEATURES = ["store", "item", "dow", "month", "is_holiday", "promo",
-            "lag_7", "lag_14", "lag_28", "roll_mean_7", "roll_mean_28", "roll_std_7"]
-
-st.title("📦 Grocery Demand Forecasting — Quantile Model")
+st.title("Grocery Demand Forecasting -- Quantile Model")
 st.caption(
     "A distributional (quantile) demand forecasting model trained on a synthetic multi-store, "
-    "multi-SKU grocery dataset generated to mirror real retail patterns — weekly seasonality, "
-    "promo lift, holiday spikes, and store-level trend — since the standard public grocery "
+    "multi-SKU grocery dataset generated to mirror real retail patterns -- weekly seasonality, "
+    "promo lift, holiday spikes, and store-level trend -- since the standard public grocery "
     "datasets (e.g. Kaggle's M5) sit behind a login this demo can't authenticate through. "
     "The forecasting and evaluation methodology is the point: rolling-origin backtesting, "
     "p10/p50/p90 quantile forecasts, and comparison against a seasonal-naive baseline."
@@ -85,19 +95,22 @@ fig.add_trace(go.Scatter(x=history["date"], y=history["units"], name="Actual (hi
 fig.add_trace(go.Scatter(x=future["date"], y=future["p50"], name="Forecast (p50)",
                           line=dict(color="#D97706", dash="dash")))
 fig.add_trace(go.Scatter(x=future["date"], y=future["p90"], name="p90", line=dict(width=0), showlegend=False))
-fig.add_trace(go.Scatter(x=future["date"], y=future["p10"], name="80% Interval (p10–p90)",
+fig.add_trace(go.Scatter(x=future["date"], y=future["p10"], name="80% Interval (p10-p90)",
                           line=dict(width=0), fill="tonexty", fillcolor="rgba(217,119,6,0.2)"))
 fig.update_layout(height=450, margin=dict(l=10, r=10, t=30, b=10),
                    legend=dict(orientation="h", yanchor="bottom", y=1.02))
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 st.subheader("Forecast table")
-st.dataframe(future.round(1), use_container_width=True, hide_index=True)
+display = future.copy()
+num_cols = display.select_dtypes(include="number").columns
+display[num_cols] = display[num_cols].round(1)
+st.dataframe(display, width="stretch", hide_index=True)
 
 st.divider()
 st.caption(
     "Model: LightGBM gradient-boosted trees trained separately at the 10th, 50th, and 90th "
-    "percentiles (quantile/pinball loss objective) — a distributional forecasting approach, "
+    "percentiles (quantile/pinball loss objective) -- a distributional forecasting approach, "
     "not a single point estimate. Backtested with rolling-origin (walk-forward) validation, "
     "the standard approach for time-series to avoid leaking future information into training."
 )
